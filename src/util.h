@@ -5,11 +5,13 @@
 #include <vector>
 #include <functional>
 #include "raylib.h"
+#include "rlgl.h"
 #define GLM_FORCE_SWIZZLE
 #include "glm/glm.hpp"
 #include "glm/gtx/string_cast.hpp"
 
 static constexpr float EPSILON = 1e-8f;
+static constexpr glm::vec3 UP = glm::vec3(0.0f, 1.0f, 0.0f);
 
 #define ARRSIZE(arr) (sizeof(arr) / (sizeof(*arr)))
 
@@ -72,6 +74,7 @@ struct InfillData {
         glm::vec2 p2;
     };
     std::vector<Line> lines;
+    uint32_t layer_idx;
 };
 
 

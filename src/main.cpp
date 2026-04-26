@@ -1,6 +1,6 @@
 #include "util.h"
 
-static constexpr float LAYER_HEIGHT = 0.1f;
+static void DrawText3D(Font font, const char *text, Vector3 position, float fontSize, float fontSpacing, float lineSpacing, bool backface, Color tint);
 
 static BoundingBox bounding_box;
 static std::vector<Triangle> model_data;
@@ -55,9 +55,12 @@ int main() {
     const int screenHeight = 720;
 
     InitWindow(screenWidth, screenHeight, "Window");
+    SetTargetFPS(60);
 
     Model model = LoadModel("bin/stanford_bunny.obj");
+    static constexpr float LAYER_HEIGHT = 0.1f;
     static constexpr float MODEL_SCALE = 30.0f;
+    static constexpr float LINE_WIDTH = 0.04f;
     LoadModelData(model, MODEL_SCALE);
 
     BBox model_bounds = {
@@ -69,50 +72,70 @@ int main() {
         .pattern = InfillSettings::Pattern::Rectilinear,
         .percentage = 100.0f,
         .offset = 0.0f,
-        .line_width = 0.1f,
+        .line_width = LINE_WIDTH,
         .offset_rectilinear = false,
     };
-    InfillData infill_data = Util_CalculateInfill(groups, settings, 0);
+    std::vector<InfillData> line_data;
+    for(size_t i = 0; i < groups.back().layer_idx; ++i) {
+        InfillData infill_data = Util_CalculateInfill(groups, settings, i);
+        line_data.emplace_back(std::move(infill_data));
+    }
 
     Camera3D camera = { 0 };
     float distance = 10.0f;
     float phi = 0.0f;
     float theta = 0.0f;
 
-    glm::vec3 center_offset = glm::vec3(0.0f, (bounding_box.min.y + bounding_box.max.y) * 0.5f, 0.0f);
-    const glm::vec3 cam_pos = distance * glm::vec3(cos(theta) * sin(phi), sin(theta), cos(theta) * cos(phi)) + center_offset;
+    glm::vec3 target_pos = glm::vec3(0.0f, (bounding_box.min.y + bounding_box.max.y) * 0.5f, 0.0f);
+    glm::vec3 cam_pos = distance * glm::vec3(cos(theta) * sin(phi), sin(theta), cos(theta) * cos(phi)) + target_pos;
 
     camera.position = {cam_pos.x, cam_pos.y, cam_pos.z};
-    camera.target = (Vector3){center_offset.x, center_offset.y, center_offset.z};
-    camera.up = (Vector3){ 0.0f, 1.0f, 0.0f };
+    camera.target = (Vector3){target_pos.x, target_pos.y, target_pos.z};
+    camera.up = (Vector3){ UP.x, UP.y, UP.z };
     camera.fovy = 45.0f;
     camera.projection = CAMERA_PERSPECTIVE;
-    Vector3 cubePosition = { 0.0f, 0.0f, 0.0f };
-    SetTargetFPS(60);
 
-
+    uint32_t inspecting_layer = UINT32_MAX;
     while(!WindowShouldClose()) {
         if(IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
             Vector2 delta = GetMouseDelta();
             phi -= delta.x * 0.004f;
             theta += delta.y * 0.004f;
-            const glm::vec3 cam_pos = distance * glm::vec3(cos(theta) * sin(phi), sin(theta), cos(theta) * cos(phi)) + center_offset;
+            cam_pos = distance * glm::vec3(cos(theta) * sin(phi), sin(theta), cos(theta) * cos(phi)) + target_pos;
             camera.position = {cam_pos.x, cam_pos.y, cam_pos.z};
         }
         if(IsMouseButtonDown(MOUSE_BUTTON_MIDDLE)) {
             Vector2 delta = GetMouseDelta();
+            float mov_x = delta.x * 0.01f;
             float mov_y = delta.y * 0.01f;
-            camera.position.y += mov_y;
-            camera.target.y += mov_y;
-            center_offset.y += mov_y;
+
+            cam_pos.y += mov_y;
+            target_pos.y += mov_y;
+
+            const glm::vec3 look_dir = glm::normalize(target_pos - cam_pos);
+            const glm::vec3 tangent = glm::normalize(glm::cross(UP, look_dir));
+
+            cam_pos += tangent * mov_x;
+            target_pos += tangent * mov_x;
+            camera.position = {cam_pos.x, cam_pos.y, cam_pos.z};
+            camera.target = {target_pos.x, target_pos.y, target_pos.z};
         }
         const float mouse_wheel = GetMouseWheelMove();
         if(glm::abs(mouse_wheel) > EPSILON) {
             distance -= mouse_wheel * 1.0f;
             distance = std::max(std::min(20.0f, distance), 1.0f);
-            const glm::vec3 cam_pos = distance * glm::vec3(cos(theta) * sin(phi), sin(theta), cos(theta) * cos(phi)) + center_offset;
+            cam_pos = distance * glm::vec3(cos(theta) * sin(phi), sin(theta), cos(theta) * cos(phi)) + target_pos;
             camera.position = {cam_pos.x, cam_pos.y, cam_pos.z};
         }
+        if(IsKeyPressed(KEY_Z)) {
+            inspecting_layer += 1;
+        }
+        else if(IsKeyPressed(KEY_X)) {
+            if(inspecting_layer != UINT32_MAX) {
+                inspecting_layer -= 1;
+            }
+        }
+
         BeginDrawing();
         {
             ClearBackground(BLACK);
@@ -133,6 +156,10 @@ int main() {
                 for(const SurfaceGroup& g : groups) {
                     const Color group_color = AVAILABLE_COLORS[group_counter % ARRSIZE(AVAILABLE_COLORS)];
                     const Color layer_color = AVAILABLE_COLORS[g.layer_idx % ARRSIZE(AVAILABLE_COLORS)];
+                    const float cur_y = (g.layer_idx + 1) * LAYER_HEIGHT + model_bounds.min.y;
+                    if(inspecting_layer != UINT32_MAX && g.layer_idx != inspecting_layer) {
+                        continue;
+                    }
                     for(const auto& c_g : g.convex_groups) {
                         //for(const ConvexGroup::Edge& edge : c_g.outer_edges) {
                         //    uint32_t i1 = edge.p1;
@@ -174,15 +201,19 @@ int main() {
                         const glm::vec3 p2 = g.points.at(next);
                         DrawLine3D({p1.x, p1.y, p1.z}, {p2.x, p2.y, p2.z}, layer_color);
                         line_counter += 1;
-                    }
-                    if(g.layer_idx == 0) {
-                        for(size_t i = 0; i < infill_data.lines.size(); ++i) {
-                            const glm::vec3 p1 = {infill_data.lines.at(i).p1.x, 0.0f, infill_data.lines.at(i).p1.y};
-                            const glm::vec3 p2 = {infill_data.lines.at(i).p2.x, 0.0f, infill_data.lines.at(i).p2.y};
-                            DrawLine3D({p1.x, p1.y, p1.z}, {p2.x, p2.y, p2.z}, layer_color);
-
+                        if(inspecting_layer != UINT32_MAX) {
+                            const glm::vec3 text_pos = p1 + glm::vec3(0.0f, 0.1f, 0.0f);
+                            DrawText3D(GetFontDefault(), std::to_string(i).c_str(), {text_pos.x, text_pos.y, text_pos.z}, 0.04f, 0.004f, -0.1f, true, WHITE);
                         }
                     }
+                    if(inspecting_layer != UINT32_MAX) {
+                        BoundingBox bb = {
+                            .min = {g.bounds.min.x, cur_y - 0.1f, g.bounds.min.y},
+                            .max = {g.bounds.max.x, cur_y + 0.1f, g.bounds.max.y},
+                        };
+                        DrawBoundingBox(bb, GREEN);
+                    }
+
 
                     // draw each pair of points as a line
                     //for(size_t i = 0; i < g.points.size() / 2; ++i) {
@@ -195,15 +226,141 @@ int main() {
                     //}
                     group_counter += 1;
                 }
+
+                for(const InfillData& infill_data : line_data) {
+                    if(inspecting_layer != UINT32_MAX && infill_data.layer_idx != inspecting_layer) {
+                        continue;
+                    }
+                    const float cur_y = (infill_data.layer_idx + 1) * LAYER_HEIGHT + model_bounds.min.y;
+                    for(size_t i = 0; i < infill_data.lines.size(); ++i) {
+                        const glm::vec3 p1 = {infill_data.lines.at(i).p1.x, cur_y, infill_data.lines.at(i).p1.y};
+                        const glm::vec3 p2 = {infill_data.lines.at(i).p2.x, cur_y, infill_data.lines.at(i).p2.y};
+                        DrawLine3D({p1.x, p1.y, p1.z}, {p2.x, p2.y, p2.z}, RED);
+                    }
+                }
+
+
                 DrawBoundingBox(bounding_box, YELLOW);
+
                 //DrawModel(model, {0.0f, 0.0f, 0.0f}, MODEL_SCALE, GREEN);
                 DrawGrid(10, 1.0f);
             }
             EndMode3D();
         }
+
+        if(inspecting_layer != UINT32_MAX) {
+            std::string info = "Inspecting: " + std::to_string(inspecting_layer);
+            DrawText(info.c_str(), 0, 0, 16, WHITE);
+        }
+
         EndDrawing();
     }
     CloseWindow();
     
     return 0;
+}
+
+
+// Source: raylib examples text_3d_drawing
+static void DrawTextCodepoint3D(Font font, int codepoint, Vector3 position, float fontSize, bool backface, Color tint) {
+    // Character index position in sprite font
+    // NOTE: In case a codepoint is not available in the font, index returned points to '?'
+    int index = GetGlyphIndex(font, codepoint);
+    float scale = fontSize/(float)font.baseSize;
+
+    // Character destination rectangle on screen
+    // NOTE: We consider charsPadding on drawing
+    position.x += (float)(font.glyphs[index].offsetX - font.glyphPadding)*scale;
+    position.z += (float)(font.glyphs[index].offsetY - font.glyphPadding)*scale;
+
+    // Character source rectangle from font texture atlas
+    // NOTE: We consider chars padding when drawing, it could be required for outline/glow shader effects
+    Rectangle srcRec = { font.recs[index].x - (float)font.glyphPadding, font.recs[index].y - (float)font.glyphPadding,
+                         font.recs[index].width + 2.0f*font.glyphPadding, font.recs[index].height + 2.0f*font.glyphPadding };
+
+    float width = (float)(font.recs[index].width + 2.0f*font.glyphPadding)*scale;
+    float height = (float)(font.recs[index].height + 2.0f*font.glyphPadding)*scale;
+
+    if (font.texture.id > 0)
+    {
+        const float x = 0.0f;
+        const float y = 0.0f;
+        const float z = 0.0f;
+
+        // normalized texture coordinates of the glyph inside the font texture (0.0f -> 1.0f)
+        const float tx = srcRec.x/font.texture.width;
+        const float ty = srcRec.y/font.texture.height;
+        const float tw = (srcRec.x+srcRec.width)/font.texture.width;
+        const float th = (srcRec.y+srcRec.height)/font.texture.height;
+
+        rlCheckRenderBatchLimit(4 + 4*backface);
+        rlSetTexture(font.texture.id);
+
+        rlPushMatrix();
+            rlTranslatef(position.x, position.y, position.z);
+
+            rlBegin(RL_QUADS);
+                rlColor4ub(tint.r, tint.g, tint.b, tint.a);
+
+                // Front Face
+                rlNormal3f(0.0f, 1.0f, 0.0f);                                   // Normal Pointing Up
+                rlTexCoord2f(tx, ty); rlVertex3f(x,         y, z);              // Top Left Of The Texture and Quad
+                rlTexCoord2f(tx, th); rlVertex3f(x,         y, z + height);     // Bottom Left Of The Texture and Quad
+                rlTexCoord2f(tw, th); rlVertex3f(x + width, y, z + height);     // Bottom Right Of The Texture and Quad
+                rlTexCoord2f(tw, ty); rlVertex3f(x + width, y, z);              // Top Right Of The Texture and Quad
+
+                if (backface)
+                {
+                    // Back Face
+                    rlNormal3f(0.0f, -1.0f, 0.0f);                              // Normal Pointing Down
+                    rlTexCoord2f(tx, ty); rlVertex3f(x,         y, z);          // Top Right Of The Texture and Quad
+                    rlTexCoord2f(tw, ty); rlVertex3f(x + width, y, z);          // Top Left Of The Texture and Quad
+                    rlTexCoord2f(tw, th); rlVertex3f(x + width, y, z + height); // Bottom Left Of The Texture and Quad
+                    rlTexCoord2f(tx, th); rlVertex3f(x,         y, z + height); // Bottom Right Of The Texture and Quad
+                }
+            rlEnd();
+        rlPopMatrix();
+
+        rlSetTexture(0);
+    }
+}
+static void DrawText3D(Font font, const char *text, Vector3 position, float fontSize, float fontSpacing, float lineSpacing, bool backface, Color tint) {
+    int length = TextLength(text);          // Total length in bytes of the text, scanned by codepoints in loop
+
+    float textOffsetY = 0.0f;               // Offset between lines (on line break '\n')
+    float textOffsetX = 0.0f;               // Offset X to next character to draw
+
+    float scale = fontSize/(float)font.baseSize;
+
+    for (int i = 0; i < length;)
+    {
+        // Get next codepoint from byte string and glyph index in font
+        int codepointByteCount = 0;
+        int codepoint = GetCodepoint(&text[i], &codepointByteCount);
+        int index = GetGlyphIndex(font, codepoint);
+
+        // NOTE: Normally we exit the decoding sequence as soon as a bad byte is found (and return 0x3f)
+        // but we need to draw all of the bad bytes using the '?' symbol moving one byte
+        if (codepoint == 0x3f) codepointByteCount = 1;
+
+        if (codepoint == '\n')
+        {
+            // NOTE: Fixed line spacing of 1.5 line-height
+            // TODO: Support custom line spacing defined by user
+            textOffsetY += fontSize + lineSpacing;
+            textOffsetX = 0.0f;
+        }
+        else
+        {
+            if ((codepoint != ' ') && (codepoint != '\t'))
+            {
+                DrawTextCodepoint3D(font, codepoint, (Vector3){ position.x + textOffsetX, position.y, position.z + textOffsetY }, fontSize, backface, tint);
+            }
+
+            if (font.glyphs[index].advanceX == 0) textOffsetX += (float)font.recs[index].width*scale + fontSpacing;
+            else textOffsetX += (float)font.glyphs[index].advanceX*scale + fontSpacing;
+        }
+
+        i += codepointByteCount;   // Move text bytes counter to next codepoint
+    }
 }

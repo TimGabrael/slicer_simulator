@@ -433,7 +433,7 @@ float Util_LineLineIntersection(const glm::vec2& p1, const glm::vec2& dir1, cons
 
     const glm::vec2 p2p1 = p2 - p1;
     const float u = (p2p1.x * dir1.y - p2p1.y * dir1.x) / cross;
-    if(u < 0.0f || u > 1.0f) {
+    if(u < -EPSILON || u > (1.0f + EPSILON)) {
         return -FLT_MAX;
     }
 
@@ -592,6 +592,7 @@ std::vector<SurfaceGroup> Util_CalculateSurfaceGroups(const std::vector<Triangle
 }
 InfillData Util_CalculateInfill(const std::vector<SurfaceGroup>& groups, const InfillSettings& settings, uint32_t layer) {
     InfillData output = {};
+    output.layer_idx = layer;
     if(groups.empty()) {
         return output;
     }
@@ -638,10 +639,10 @@ InfillData Util_CalculateInfill(const std::vector<SurfaceGroup>& groups, const I
     uint32_t real_line_count = max_line_count * settings.percentage / 100.0f;
     const float line_distance = height / static_cast<float>(real_line_count);
     for(uint32_t i = 0; i < real_line_count; ++i) {
-        glm::vec2 start = center - height * nor * 0.5f + i * line_distance - dir * diagonal;
+        glm::vec2 start = center - height * nor * 0.5f + i * line_distance * nor - dir * diagonal;
         rays.push_back({
                 .start = start,
-                .dir = dir * 4.0f * diagonal,
+                .dir = dir * 2.0f * diagonal,
                 .hits = {},
         });
     }
@@ -662,7 +663,7 @@ InfillData Util_CalculateInfill(const std::vector<SurfaceGroup>& groups, const I
             const glm::vec2 l2 = group.points.at(next).xz();
             for(auto& ray : rays) {
                 float t = Util_LineLineIntersection(ray.start, ray.dir, l1, l2 - l1);
-                if(t >= 0.0f && t <= 1.0f) {
+                if(t >= -EPSILON && t <= (1.0f + EPSILON)) {
                     ray.hits.push_back(t);
                 }
             }
