@@ -13,6 +13,6 @@ endif()
 
 add_subdirectory(third-party/raylib/)
 include_directories(third-party/raylib/src)
-add_executable(slicer src/main.cpp src/util.cpp src/util.h)
+add_executable(slicer src/main.cpp src/util.cpp src/util.h src/simulation.h src/simulation.cpp)
 
 target_link_libraries(slicer raylib)

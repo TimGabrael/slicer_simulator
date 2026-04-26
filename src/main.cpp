@@ -51,10 +51,10 @@ void LoadModelData(const Model& model, float scale) {
 
 
 int main() {
-    const int screenWidth = 1280;
-    const int screenHeight = 720;
+    constexpr int SCREEN_WIDTH = 1280;
+    constexpr int SCREEN_HEIGHT = 720;
 
-    InitWindow(screenWidth, screenHeight, "Window");
+    InitWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "Window");
     SetTargetFPS(60);
 
     Model model = LoadModel("bin/stanford_bunny.obj");
@@ -95,6 +95,16 @@ int main() {
     camera.fovy = 45.0f;
     camera.projection = CAMERA_PERSPECTIVE;
 
+    // some desmos demo curve
+    BezierCurve2D test_bezier;
+    test_bezier.control_points = {
+        {3.71f, 0.52f},
+        {7.75f, 4.0f},
+        {5.87f, 7.46f},
+        {2.0f, 6.34f},
+    };
+
+
     uint32_t inspecting_layer = UINT32_MAX;
     while(!WindowShouldClose()) {
         if(IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
@@ -127,13 +137,17 @@ int main() {
             cam_pos = distance * glm::vec3(cos(theta) * sin(phi), sin(theta), cos(theta) * cos(phi)) + target_pos;
             camera.position = {cam_pos.x, cam_pos.y, cam_pos.z};
         }
-        if(IsKeyPressed(KEY_Z)) {
+        // Raylib uses the QWERTY-Keyboard layout...
+        if(IsKeyPressed(KEY_Z) || IsKeyPressedRepeat(KEY_Z)) {
             inspecting_layer += 1;
         }
-        else if(IsKeyPressed(KEY_X)) {
+        else if(IsKeyPressed(KEY_X) || IsKeyPressedRepeat(KEY_X)) {
             if(inspecting_layer != UINT32_MAX) {
                 inspecting_layer -= 1;
             }
+        }
+        else if(IsKeyPressed(KEY_R)) {
+            inspecting_layer = UINT32_MAX;
         }
 
         BeginDrawing();
@@ -251,6 +265,18 @@ int main() {
         if(inspecting_layer != UINT32_MAX) {
             std::string info = "Inspecting: " + std::to_string(inspecting_layer);
             DrawText(info.c_str(), 0, 0, 16, WHITE);
+        }
+
+        static constexpr float step_size = 1.0f / 100.0f;
+        float cur_t = 0.0f;
+        glm::vec2 prev_pos = test_bezier.Sample(cur_t) * glm::vec2(SCREEN_WIDTH, SCREEN_HEIGHT) * 0.1f;
+        while(cur_t < 1.0f) {
+
+            const glm::vec2 pos = test_bezier.Sample(cur_t) * glm::vec2(SCREEN_WIDTH, SCREEN_HEIGHT) * 0.1f;
+            DrawLine(prev_pos.x, prev_pos.y, pos.x, pos.y, ORANGE);
+
+            prev_pos = pos;
+            cur_t += step_size;
         }
 
         EndDrawing();

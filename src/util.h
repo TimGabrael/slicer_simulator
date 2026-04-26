@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <unordered_map>
 #include <vector>
+#include <array>
 #include <functional>
 #include "raylib.h"
 #include "rlgl.h"
@@ -30,6 +31,49 @@ struct BBox2D {
     glm::vec2 min;
     glm::vec2 max;
 };
+
+struct BezierCurve2D {
+    std::vector<glm::vec2> control_points;
+    glm::vec2 Sample(float t) const;
+    glm::vec2 SampleDerivative(float t) const;
+    float ComputeLength(float integration_step_size) const;
+};
+struct BezierCurve1D {
+    std::vector<float> control_points;
+    float Sample(float t) const;
+    float SampleDerivative(float t) const;
+    float ComputeLength(float integration_step_size) const;
+    float Integrate(float start, float end, float dt) const;
+};
+
+struct Path2D {
+    struct Curve {
+        BezierCurve2D bezier;
+        float lenght;
+        float start_percentile;
+        float end_percentile;
+        float inv_percentile;
+    };
+    std::vector<Curve> curves;
+    float length;
+
+    glm::vec2 Sample(float t) const;
+};
+struct Path1D {
+    struct Curve {
+        BezierCurve1D bezier;
+        float lenght;
+        float start_percentile;
+        float end_percentile;
+        float inv_percentile;
+    };
+    std::vector<Curve> curves;
+    float length;
+
+    float Sample(float t) const;
+    float Integrate(float start, float end, float dt) const;
+};
+
 struct ConvexGroup {
     struct Edge {
         uint32_t p1;
@@ -56,7 +100,7 @@ struct InfillSettings {
     enum Pattern {
         Rectilinear,
         Monotonic,
-        Grid,
+        Grid, // todo: implement
     };
     Pattern pattern;
 
@@ -65,7 +109,8 @@ struct InfillSettings {
 
     float offset;
     float line_width;
-    // offset rectilinear
+
+    // changes the start direction and therefore subsequent directions
     bool offset_rectilinear;
 };
 struct InfillData {
@@ -74,8 +119,10 @@ struct InfillData {
         glm::vec2 p2;
     };
     std::vector<Line> lines;
+    BBox2D bounds;
     uint32_t layer_idx;
 };
+
 
 
 bool Util_PlaneTriangleIntersectionTest(const Triangle& trig, const Plane& plane, glm::vec3& h1, glm::vec3& h2);

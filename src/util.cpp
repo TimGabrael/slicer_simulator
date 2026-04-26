@@ -4,6 +4,209 @@ static float Cross(const glm::vec2& a, const glm::vec2& b, const glm::vec2& c) {
     return (b.x - a.x) * (c.y - b.y) - (b.y - a.y) * (c.x - b.x);
 }
 
+static consteval float BinomialCoefficient(size_t n, size_t k) {
+    if (k > n) return 0.0f;
+    if (k == 0 || k == n) return 1.0f;
+
+    float res = 1.0f;
+    for (size_t i = 1; i <= k; ++i) {
+        res *= static_cast<float>(n - (k - i));
+        res /= static_cast<float>(i);
+    }
+    return res;
+}
+consteval std::vector<float> CreateBinomialCoefficientsVector(size_t n) {
+    std::vector<float> row(n + 1);
+    for (size_t k = 0; k <= n; ++k) {
+        row[k] = BinomialCoefficient(n, k);
+    }
+    return row;
+}
+template<size_t max_n>
+consteval auto CreateBinomialCoefficientsMap() {
+    std::array<std::array<float, max_n>, max_n> map{};
+    for(size_t n = 0; n < max_n; ++n) {
+        for(size_t k = 0; k < max_n; ++k) {
+            map[n][k] = BinomialCoefficient(n, k);
+        }
+    }
+    return map;
+}
+
+static constexpr size_t MAX_BINOM_N = 10;
+static constexpr auto BINOMIAL_COEFFICIENTS = CreateBinomialCoefficientsMap<MAX_BINOM_N>();
+glm::vec2 BezierCurve2D::Sample(float t) const {
+    if(t < 0.0f || t > 1.0f) {
+        return {};
+    }
+    if(this->control_points.empty()) {
+        return {};
+    }
+    size_t n = this->control_points.size() - 1;
+    if(n >= MAX_BINOM_N) {
+        return {};
+    }
+    glm::vec2 out = {};
+    for(size_t k = 0; k < this->control_points.size(); ++k) {
+        out += BINOMIAL_COEFFICIENTS[n][k] * std::powf(1.0f - t, n - k) * std::powf(t, k) * this->control_points.at(k);
+    }
+    return out;
+}
+glm::vec2 BezierCurve2D::SampleDerivative(float t) const {
+    if(t < 0.0f || t > 1.0f) {
+        return {};
+    }
+    if(this->control_points.empty()) {
+        return {};
+    }
+    size_t n = this->control_points.size() - 1;
+    if(n >= MAX_BINOM_N) {
+        return {};
+    }
+    glm::vec2 out = {};
+    for(size_t k = 0; k < this->control_points.size(); ++k) {
+        out += BINOMIAL_COEFFICIENTS[n][k] * std::powf(1.0f - t, n - k - 1) * std::powf(t, k - 1) * this->control_points.at(k) * (k - n * t);
+    }
+    return out;
+}
+float BezierCurve2D::ComputeLength(float integration_step_size) const {
+    if(this->control_points.size() < 2) {
+        return 0.0f;
+    }
+    float accum = 0.0f;
+    float cur_x = 0.0f;
+    while(cur_x < 1.0f) {
+        const float deriv_len = glm::length(this->SampleDerivative(cur_x));
+        accum += deriv_len * integration_step_size;
+        cur_x += integration_step_size;
+    }
+    return accum;
+}
+float BezierCurve1D::Sample(float t) const {
+    if(t < 0.0f || t > 1.0f) {
+        return 0.0f;
+    }
+    if(this->control_points.empty()) {
+        return 0.0f;
+    }
+    size_t n = this->control_points.size() - 1;
+    if(n >= MAX_BINOM_N) {
+        return 0.0f;
+    }
+    float out = 0.0f;
+    for(size_t k = 0; k < this->control_points.size(); ++k) {
+        out += BINOMIAL_COEFFICIENTS[n][k] * std::powf(1.0f - t, n - k) * std::powf(t, k) * this->control_points.at(k);
+    }
+    return out;
+}
+float BezierCurve1D::SampleDerivative(float t) const {
+    if(t < 0.0f || t > 1.0f) {
+        return 0.0f;
+    }
+    if(this->control_points.empty()) {
+        return 0.0f;
+    }
+    size_t n = this->control_points.size() - 1;
+    if(n >= MAX_BINOM_N) {
+        return 0.0f;
+    }
+    float out = {};
+    for(size_t k = 0; k < this->control_points.size(); ++k) {
+        out += BINOMIAL_COEFFICIENTS[n][k] * std::powf(1.0f - t, n - k - 1) * std::powf(t, k - 1) * this->control_points.at(k) * (k - n * t);
+    }
+    return out;
+}
+float BezierCurve1D::ComputeLength(float integration_step_size) const {
+    if(this->control_points.size() < 2) {
+        return 0.0f;
+    }
+    float accum = 0.0f;
+    float cur_x = 0.0f;
+    while(cur_x < 1.0f) {
+        const float deriv_len = std::abs(this->SampleDerivative(cur_x));
+        accum += deriv_len * integration_step_size;
+        cur_x += integration_step_size;
+    }
+    return accum;
+}
+float BezierCurve1D::Integrate(float start, float end, float dt) const {
+    if(this->control_points.size() < 2) {
+        return 0.0f;
+    }
+    if(start < 0.0f || start > 1.0f || end < 0.0f || end > 1.0f) {
+        return 0.0f;
+    }
+    float accum = 0.0f;
+    if(end < start) {
+        accum += this->Integrate(end, 1.0f, dt);
+        accum += this->Integrate(0.0f, start, dt);
+    }
+    else {
+        float cur_x = start;
+        while(cur_x < end) {
+            const float sample = this->Sample(cur_x);
+            accum += sample * dt;
+            cur_x += dt;
+        }
+    }
+    return accum;
+}
+glm::vec2 Path2D::Sample(float t) const {
+    if(t < 0.0f || t > 1.0f) {
+        return {};
+    }
+    for(const auto& curve : this->curves) {
+        if(curve.start_percentile <= t && t <= curve.end_percentile) {
+            const float local_t = (t - curve.start_percentile) * curve.inv_percentile;
+            return curve.bezier.Sample(local_t);
+        }
+    }
+    return {};
+}
+float Path1D::Sample(float t) const {
+    if(t < 0.0f || t > 1.0f) {
+        return 0.0f;
+    }
+    for(const auto& curve : this->curves) {
+        if(curve.start_percentile <= t && t <= curve.end_percentile) {
+            const float local_t = (t - curve.start_percentile) * curve.inv_percentile;
+            return curve.bezier.Sample(local_t);
+        }
+    }
+    return 0.0f;
+}
+float Path1D::Integrate(float start, float end, float dt) const {
+    if(start < 0.0f || start > 1.0f || end < 0.0f || end > 1.0f) {
+        return 0.0f;
+    }
+    float accum = 0.0f;
+    if(end < start) {
+        accum += this->Integrate(end, 1.0f, dt);
+        accum += this->Integrate(0.0f, start, dt);
+    }
+    else {
+        for(const auto& curve : this->curves) {
+            if(curve.start_percentile <= start && end <= curve.end_percentile) {
+                const float local_start = (start - curve.start_percentile) * curve.inv_percentile;
+                const float local_end = (end - curve.start_percentile) * curve.inv_percentile;
+                return curve.bezier.Integrate(local_start, local_end, dt * curve.inv_percentile);
+            }
+            else if(curve.start_percentile <= start && end > curve.end_percentile) {
+                const float local_start = (start - curve.start_percentile) * curve.inv_percentile;
+                accum += curve.bezier.Integrate(local_start, 1.0f, dt * curve.inv_percentile);
+            }
+            else if(curve.start_percentile > start && end <= curve.end_percentile) {
+                const float local_end = (end - curve.start_percentile) * curve.inv_percentile;
+                accum += curve.bezier.Integrate(0.0f, local_end, dt * curve.inv_percentile);
+            }
+            else if(curve.start_percentile > start && end > curve.end_percentile) {
+                accum += curve.bezier.Integrate(0.0f, 1.0f, dt * curve.inv_percentile);
+            }
+        }
+    }
+    return accum;
+}
+
 float SurfaceGroup::ComputeLength() const {
     float full_len = 0.0f;
     for(size_t i = 0; i < this->points.size(); ++i) {
@@ -615,6 +818,14 @@ InfillData Util_CalculateInfill(const std::vector<SurfaceGroup>& groups, const I
             nor = {1.0f, 0.0f};
         }
     }
+    else if(settings.pattern == InfillSettings::Pattern::Monotonic) {
+        dir = {1.0f, 0.0f};
+        nor = {0.0f, 1.0f};
+        if(settings.offset_rectilinear) {
+            dir = {0.0f, 1.0f};
+            nor = {1.0f, 0.0f};
+        }
+    }
 
     glm::vec2 bb_min = glm::vec2(FLT_MAX);
     glm::vec2 bb_max = glm::vec2(-FLT_MAX);
@@ -631,6 +842,10 @@ InfillData Util_CalculateInfill(const std::vector<SurfaceGroup>& groups, const I
         bb_min = glm::min(bb_min, min);
         bb_max = glm::max(bb_max, max);
     }
+
+    output.bounds.min = bb_min;
+    output.bounds.max = bb_max;
+
     const glm::vec2 center = (bb_min + bb_max) * 0.5f;
     const float height = glm::dot((bb_max - bb_min), nor);
     const float diagonal = glm::distance(bb_min, bb_max);
