@@ -15,6 +15,9 @@ struct Nozzle {
     float local_path_time_scale;
 };
 struct MaterialConstants {
+    float thermal_absorptance; // actually used
+
+    // might be useful
     float melting_point;
     float thermal_conductvity;
     float heat_capacity;

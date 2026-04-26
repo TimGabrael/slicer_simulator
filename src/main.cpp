@@ -95,15 +95,6 @@ int main() {
     camera.fovy = 45.0f;
     camera.projection = CAMERA_PERSPECTIVE;
 
-    // some desmos demo curve
-    BezierCurve2D test_bezier;
-    test_bezier.control_points = {
-        {3.71f, 0.52f},
-        {7.75f, 4.0f},
-        {5.87f, 7.46f},
-        {2.0f, 6.34f},
-    };
-
 
     uint32_t inspecting_layer = UINT32_MAX;
     while(!WindowShouldClose()) {
@@ -245,11 +236,12 @@ int main() {
                     if(inspecting_layer != UINT32_MAX && infill_data.layer_idx != inspecting_layer) {
                         continue;
                     }
+                    const Color layer_color = AVAILABLE_COLORS[infill_data.layer_idx % ARRSIZE(AVAILABLE_COLORS)];
                     const float cur_y = (infill_data.layer_idx + 1) * LAYER_HEIGHT + model_bounds.min.y;
                     for(size_t i = 0; i < infill_data.lines.size(); ++i) {
                         const glm::vec3 p1 = {infill_data.lines.at(i).p1.x, cur_y, infill_data.lines.at(i).p1.y};
                         const glm::vec3 p2 = {infill_data.lines.at(i).p2.x, cur_y, infill_data.lines.at(i).p2.y};
-                        DrawLine3D({p1.x, p1.y, p1.z}, {p2.x, p2.y, p2.z}, RED);
+                        DrawLine3D({p1.x, p1.y, p1.z}, {p2.x, p2.y, p2.z}, layer_color);
                     }
                 }
 
@@ -265,18 +257,6 @@ int main() {
         if(inspecting_layer != UINT32_MAX) {
             std::string info = "Inspecting: " + std::to_string(inspecting_layer);
             DrawText(info.c_str(), 0, 0, 16, WHITE);
-        }
-
-        static constexpr float step_size = 1.0f / 100.0f;
-        float cur_t = 0.0f;
-        glm::vec2 prev_pos = test_bezier.Sample(cur_t) * glm::vec2(SCREEN_WIDTH, SCREEN_HEIGHT) * 0.1f;
-        while(cur_t < 1.0f) {
-
-            const glm::vec2 pos = test_bezier.Sample(cur_t) * glm::vec2(SCREEN_WIDTH, SCREEN_HEIGHT) * 0.1f;
-            DrawLine(prev_pos.x, prev_pos.y, pos.x, pos.y, ORANGE);
-
-            prev_pos = pos;
-            cur_t += step_size;
         }
 
         EndDrawing();

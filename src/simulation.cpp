@@ -51,7 +51,28 @@ struct NozzleSimData {
         this->travel = this->nozzle->speed.Integrate(prev_speed_time, this->speed_time, dt_speed * inv_integration_substeps);
     }
 };
+struct SimulationSurface {
+    float* data;
+    uint32_t width;
+    uint32_t height;
+    BBox2D bounds;
+    glm::vec2 extend;
+    glm::vec2 pixel_size;
 
+};
+
+
+// px, py, radius in pixel
+static void MaterialAddHeatAtSpot(SimulationSurface& surface, const MaterialConstants& material, float center_x, float center_y, float radius, float temperature) {
+    const float inv_radius_2 = 1.0f / (radius * radius);
+    auto heating_at_point = [temperature, inv_radius_2, center_x, center_y](float x, float y) {
+        const float dx = (x - center_x);
+        const float dy = (y - center_y);
+        const float r = std::sqrtf(dx * dx + dy * dy);
+        return temperature * std::expf(-2.0f * r * inv_radius_2);
+    };
+
+}
 HotSpotData Sim_CalculateTemperatureGradient(const InfillData& info, const std::vector<Nozzle>& nozzles, const MaterialConstants& material, uint32_t resolution_x, float time_step) {
     static constexpr float INTEGRATION_SUBSTEPS = 10.0f;
     static constexpr float INV_INTEGRATION_SUBSTEPS = 1.0f / INTEGRATION_SUBSTEPS;
@@ -71,7 +92,15 @@ HotSpotData Sim_CalculateTemperatureGradient(const InfillData& info, const std::
         return output;
     }
 
-    const glm::vec2 pixel_size = glm::vec2(extend.x / output.width, extend.y / output.height);
+    SimulationSurface surface = {};
+    surface.data = new float[output.width * output.height];
+    surface.width = output.width;
+    surface.height = output.height;
+    surface.bounds = info.bounds;
+    surface.extend = surface.bounds.max - surface.bounds.min;
+    surface.pixel_size = glm::vec2(surface.extend.x / surface.width, surface.extend.y / surface.height);
+    memset(surface.data, 0, sizeof(float) * output.width * output.height);
+
 
     std::vector<NozzleSimData> nozzles_sim_data(nozzles.size());
     for(uint32_t i = 0; i < nozzles_sim_data.size(); ++i) {
@@ -97,12 +126,21 @@ HotSpotData Sim_CalculateTemperatureGradient(const InfillData& info, const std::
         for(auto& nozzle : nozzles_sim_data) {
             nozzle.UpdateSimulationVariables(time_step, INV_INTEGRATION_SUBSTEPS);
 
-            if(info.lines.size() < nozzle.cur_line_idx) {
-                nozzle.finished = true;
-            }
-            else {
-                const glm::vec2 p1 = info.lines.at(nozzle.cur_line_idx).p1;
-                const glm::vec2 p2 = info.lines.at(nozzle.cur_line_idx).p2;
+            while(true) {
+                if(info.lines.size() < nozzle.cur_line_idx) {
+                    nozzle.finished = true;
+                    break;
+                }
+                else {
+                    const glm::vec2 p1 = info.lines.at(nozzle.cur_line_idx).p1;
+                    const glm::vec2 p2 = info.lines.at(nozzle.cur_line_idx).p2;
+                    const glm::vec2 dir = (p2 - p1);
+                    const float len = glm::length(dir);
+                    const float moved_percentile = nozzle.travel / len;
+                    if((nozzle.cur_line_percentile + moved_percentile) > 1.0f) {
+                        nozzle.cur_line_idx += 1;
+                    }
+                }
             }
 
 
