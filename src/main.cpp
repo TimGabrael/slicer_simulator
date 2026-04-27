@@ -83,7 +83,7 @@ int main() {
     }
 
     BezierCurve1D test_bezier;
-    test_bezier.control_points.push_back(LINE_WIDTH * 2.0f);
+    test_bezier.control_points.push_back(LINE_WIDTH * 4.0f);
     Nozzle nozzle = {};
 
     nozzle.size.curves.push_back({.bezier = test_bezier, 
@@ -94,7 +94,7 @@ int main() {
     });
     nozzle.size.length = 0.0f;
 
-    test_bezier.control_points.at(0) = 5000.0f;
+    test_bezier.control_points.at(0) = 150000.0f;
 
     nozzle.temperature.curves.push_back({.bezier = test_bezier, 
         .lenght = 0.0f,
@@ -104,8 +104,8 @@ int main() {
     });
     nozzle.temperature.length = 0.0f;
 
-    test_bezier.control_points.at(0) = 0.2f;
-    test_bezier.control_points.push_back(0.2f);
+    test_bezier.control_points.at(0) = 2.0f;
+    test_bezier.control_points.push_back(2.0f);
     nozzle.speed.curves.push_back({.bezier = test_bezier, 
         .lenght = 1.0f,
         .start_percentile = 0.0f,
@@ -116,62 +116,84 @@ int main() {
     nozzle.speed_time_scale = 1.0f;
 
     MaterialConstants material = {
-        .thermal_absorptance = 0.05f,
+        .thermal_absorptance = 0.5f,
+        .thermal_diffusivity = 0.1,
+        .thermal_loss_coefficient = 0.0f,
     };
 
-    //HotSpotData hotspot_data = {};
-    //uint32_t hot_spot_layer = 0xFFFFFFFF;
-    //for(size_t i = 0; i < line_data.size(); ++i) {
-    //    if(line_data.at(i).lines.empty()) {
-    //        continue;
-    //    }
-    //    hot_spot_layer = line_data.at(i).layer_idx;
-    //    hotspot_data = Sim_CalculateHotspots(line_data.at(i), {nozzle}, material, 256, 0.001f);
-    //    break;
-    //}
+    HotSpotData hotspot_data = {};
+    SimData sim_data = {
+        .resolution_x = 256,
+        .time_step = 0.01f,
+    };
+    uint32_t hot_spot_layer = 0xFFFFFFFF;
+    for(size_t i = 0; i < line_data.size(); ++i) {
+        if(line_data.at(i).lines.empty()) {
+            continue;
+        }
+        hot_spot_layer = line_data.at(i).layer_idx;
+        sim_data.bounds.min = line_data.at(i).bounds.min - glm::vec2(LINE_WIDTH * 10.0f); 
+        sim_data.bounds.max = line_data.at(i).bounds.max + glm::vec2(LINE_WIDTH * 10.0f); 
+        hotspot_data = Sim_CalculateHotspots(line_data.at(i), {nozzle}, material, sim_data);
+        break;
+    }
 
-    //uint32_t* texture_data = new uint32_t[hotspot_data.width * hotspot_data.height];
-    //float delta_hotspot = (hotspot_data.max - hotspot_data.min);
-    //if(delta_hotspot < EPSILON) {
-    //    delta_hotspot = EPSILON;
-    //}
-    //std::cout << "min/max: " << hotspot_data.min << ", " << hotspot_data.max << std::endl;
-    //// convert to decible
-    //float decible_ref = hotspot_data.max * 0.1f;
-    //hotspot_data.min = FLT_MAX;
-    //hotspot_data.max = -FLT_MAX;
-    //for(uint32_t i = 0; i < hotspot_data.width * hotspot_data.height; ++i) {
-    //    const float db = 10.0f * std::log10f((hotspot_data.data[i] + EPSILON) / decible_ref);
-    //    hotspot_data.data[i] = db;
-    //    hotspot_data.max = std::max(hotspot_data.max, db);
-    //    hotspot_data.min = std::min(hotspot_data.min, db);
-    //}
-    //delta_hotspot = (hotspot_data.max - hotspot_data.min);
-    //if(delta_hotspot < EPSILON) {
-    //    delta_hotspot = EPSILON;
-    //}
-    //for(uint32_t i = 0; i < hotspot_data.width * hotspot_data.height; ++i) {
-    //    const float normalized = (hotspot_data.data[i] - hotspot_data.min) / delta_hotspot;
+    uint32_t* texture_data = new uint32_t[hotspot_data.width * hotspot_data.height];
+    float delta_hotspot = (hotspot_data.max - hotspot_data.min);
+    std::cout << "min/max: " << hotspot_data.min << ", " << hotspot_data.max << std::endl;
+    const float cutoff = 5.0f;
+    if(hotspot_data.min < cutoff) {
+        hotspot_data.min = cutoff;
+        delta_hotspot = (hotspot_data.max - hotspot_data.min);
+    }
+    if(delta_hotspot < EPSILON) {
+        delta_hotspot = EPSILON;
+    }
+    // convert to decible
+    float decible_ref = hotspot_data.max * 0.1f;
+    hotspot_data.min = FLT_MAX;
+    hotspot_data.max = -FLT_MAX;
+    for(uint32_t i = 0; i < hotspot_data.width * hotspot_data.height; ++i) {
+        if(hotspot_data.data[i] < cutoff) {
+            hotspot_data.data[i] = -FLT_MAX;
+            continue;
+        }
+        const float db = 10.0f * std::log10f((hotspot_data.data[i] + EPSILON - cutoff * 0.8f) / decible_ref);
+        hotspot_data.data[i] = db;
+        hotspot_data.max = std::max(hotspot_data.max, db);
+        hotspot_data.min = std::min(hotspot_data.min, db);
+    }
+    delta_hotspot = (hotspot_data.max - hotspot_data.min);
+    std::cout << "db_min/max: " << hotspot_data.min << ", " << hotspot_data.max << std::endl;
+    for(uint32_t i = 0; i < hotspot_data.width * hotspot_data.height; ++i) {
+        if(hotspot_data.data[i] < -1e10) {
+            texture_data[i] = 0.0f;
+            continue;
+        }
+        const float normalized = (hotspot_data.data[i] - hotspot_data.min) / delta_hotspot;
 
+        //if(hotspot_data.data[i] < cutoff) {
+        //    texture_data[i] = 0;
+        //    continue;
+        //}
 
-    //    const glm::vec4 col = glm::vec4(1.0f, 0.0f, 0.0f, 1.0f) * normalized + (1.0f - normalized) * glm::vec4(0.0f, 0.0f, 1.0f, 1.0f);
-    //    uint32_t r = (glm::max(glm::min(col.x, 1.0f), 0.0f) * 0xFF);
-    //    uint32_t g = (glm::max(glm::min(col.y, 1.0f), 0.0f) * 0xFF);
-    //    uint32_t b = (glm::max(glm::min(col.z, 1.0f), 0.0f) * 0xFF);
-    //    uint32_t a = (glm::max(glm::min(col.w, 1.0f), 0.0f) * 0xFF);
-    //    texture_data[i] = (a << 24) | (b << 16) | (g << 8) | r;
-    //}
+        const glm::vec4 col = glm::vec4(1.0f, 0.0f, 0.0f, 1.0f) * normalized + (1.0f - normalized) * glm::vec4(0.0f, 0.0f, 1.0f, 1.0f);
+        uint32_t r = (glm::max(glm::min(col.x, 1.0f), 0.0f) * 0xFF);
+        uint32_t g = (glm::max(glm::min(col.y, 1.0f), 0.0f) * 0xFF);
+        uint32_t b = (glm::max(glm::min(col.z, 1.0f), 0.0f) * 0xFF);
+        uint32_t a = (glm::max(glm::min(col.w, 1.0f), 0.0f) * 0xFF);
+        texture_data[i] = (a << 24) | (b << 16) | (g << 8) | r;
+    }
 
-    //Image img = {};
-    //img.data = texture_data;
-    //img.width = hotspot_data.width;
-    //img.height = hotspot_data.height;
-    //img.mipmaps = 1;
-    //img.format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8;
-    //Texture2D tex = LoadTextureFromImage(img);
-    //delete[] texture_data;
-    //texture_data = nullptr;
-
+    Image img = {};
+    img.data = texture_data;
+    img.width = hotspot_data.width;
+    img.height = hotspot_data.height;
+    img.mipmaps = 1;
+    img.format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8;
+    Texture2D tex = LoadTextureFromImage(img);
+    delete[] texture_data;
+    texture_data = nullptr;
 
 
 
@@ -356,7 +378,7 @@ int main() {
             DrawText(info.c_str(), 0, 0, 16, WHITE);
         }
 
-        //DrawTexture(tex, 100, 100, WHITE);
+        DrawTexture(tex, 100, 100, WHITE);
         EndDrawing();
     }
     CloseWindow();

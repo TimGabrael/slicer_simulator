@@ -71,7 +71,7 @@ struct Path1D {
     float length;
 
     float Sample(float t) const;
-    float Integrate(float start, float end, float dt) const;
+    float Integrate(float start, float end, uint32_t integration_steps) const;
 };
 
 struct ConvexGroup {

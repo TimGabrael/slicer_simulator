@@ -15,13 +15,21 @@ struct Nozzle {
     float local_path_time_scale;
 };
 struct MaterialConstants {
-    float thermal_absorptance; // actually used
+    // actually used
+    float thermal_absorptance;
+    float thermal_diffusivity;
+    float thermal_loss_coefficient;
 
     // might be useful
     float melting_point;
     float thermal_conductvity;
     float heat_capacity;
     float thermal_expansion;
+};
+struct SimData {
+    BBox2D bounds;
+    uint32_t resolution_x;
+    float time_step;
 };
 
 struct HotSpotData {
@@ -32,6 +40,6 @@ struct HotSpotData {
     float max;
 };
 
-HotSpotData Sim_CalculateHotspots(const InfillData& info, const std::vector<Nozzle>& nozzles, const MaterialConstants& material, uint32_t resolution_x, float time_step);
+HotSpotData Sim_CalculateHotspots(const InfillData& info, const std::vector<Nozzle>& nozzles, const MaterialConstants& material, const SimData& sim);
 void Sim_DestroyHotSpotData(HotSpotData& data);
 

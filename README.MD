@@ -15,4 +15,8 @@ Stanford bunny:
 
 Single layer view, with seperated contours (layer 27).
 
-![Bunny](assets/layer_27.png)
+![Layer27](assets/layer_27.png)
+
+Simulated peak temperatures during printing (layer 0).
+
+![Temp](assets/temperature.png)

@@ -175,33 +175,24 @@ float Path1D::Sample(float t) const {
     }
     return 0.0f;
 }
-float Path1D::Integrate(float start, float end, float dt) const {
+float Path1D::Integrate(float start, float end, uint32_t integration_steps) const {
     if(start < 0.0f || start > 1.0f || end < 0.0f || end > 1.0f) {
         return 0.0f;
     }
     float accum = 0.0f;
     if(end < start) {
-        accum += this->Integrate(end, 1.0f, dt);
-        accum += this->Integrate(0.0f, start, dt);
+        std::swap(start, end);
+        const float len = (1.0f - end) + start;
+        uint32_t bottom_half_steps = len * integration_steps;
+        uint32_t upper_half_steps = integration_steps - bottom_half_steps;
+        accum += this->Integrate(end, 1.0f, bottom_half_steps);
+        accum += this->Integrate(0.0f, start, upper_half_steps);
     }
     else {
-        for(const auto& curve : this->curves) {
-            if(curve.start_percentile <= start && end <= curve.end_percentile) {
-                const float local_start = (start - curve.start_percentile) * curve.inv_percentile;
-                const float local_end = (end - curve.start_percentile) * curve.inv_percentile;
-                return curve.bezier.Integrate(local_start, local_end, dt * curve.inv_percentile);
-            }
-            else if(curve.start_percentile <= start && end > curve.end_percentile) {
-                const float local_start = (start - curve.start_percentile) * curve.inv_percentile;
-                accum += curve.bezier.Integrate(local_start, 1.0f, dt * curve.inv_percentile);
-            }
-            else if(curve.start_percentile > start && end <= curve.end_percentile) {
-                const float local_end = (end - curve.start_percentile) * curve.inv_percentile;
-                accum += curve.bezier.Integrate(0.0f, local_end, dt * curve.inv_percentile);
-            }
-            else if(curve.start_percentile > start && end > curve.end_percentile) {
-                accum += curve.bezier.Integrate(0.0f, 1.0f, dt * curve.inv_percentile);
-            }
+        const float dt = (end - start) / static_cast<float>(integration_steps);
+
+        for(uint32_t i = 0; i < integration_steps; ++i) {
+            accum += this->Sample(start + dt * i) * dt;
         }
     }
     return accum;

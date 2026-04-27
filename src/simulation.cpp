@@ -19,13 +19,13 @@ struct NozzleSimData {
 
     bool finished;
 
-    void UpdateSimulationVariables(float dt, float inv_integration_substeps) {
+    void UpdateSimulationVariables(float dt, uint32_t integration_substeps) {
         const float dt_temp = this->nozzle->temp_time_scale * dt;
         const float dt_speed = this->nozzle->speed_time_scale * dt;
         const float dt_size = this->nozzle->size_time_scale * dt;
         const float dt_path = this->nozzle->local_path_time_scale * dt;
 
-        const float prev_speed_time = this->temp_time;
+        const float prev_speed_time = this->speed_time;
 
         this->temp_time += dt_temp;
         while(this->temp_time > 1.0f) {
@@ -48,7 +48,7 @@ struct NozzleSimData {
         this->cur_speed = this->nozzle->speed.Sample(this->speed_time);
         this->cur_size = this->nozzle->size.Sample(this->size_time);
         this->cur_local_pos = this->nozzle->local_path.Sample(this->local_path_time);
-        this->travel = this->nozzle->speed.Integrate(prev_speed_time, this->speed_time, dt_speed * inv_integration_substeps);
+        this->travel = this->nozzle->speed.Integrate(prev_speed_time, this->speed_time, integration_substeps);
     }
 };
 struct SimulationSurface {
@@ -102,14 +102,60 @@ static void MaterialAddHeatAtSpot(SimulationSurface& surface, const MaterialCons
         }
     }
 }
-HotSpotData Sim_CalculateHotspots(const InfillData& info, const std::vector<Nozzle>& nozzles, const MaterialConstants& material, uint32_t resolution_x, float time_step) {
+static void MaterialDissipate(SimulationSurface& surface, float* swap_data, const MaterialConstants& material, float surrounding_temp, float dt) {
+    for(uint32_t y = 0; y < surface.height; ++y) {
+        for(uint32_t x = 0; x < surface.width; ++x) {
+            const float T = surface.data[y * surface.width + x];
+            float laplacian = -4.0f * T;
+            if(x < (surface.width - 1)) {
+                laplacian += surface.data[y * surface.width + (x + 1)];
+            }
+            else {
+                laplacian += surrounding_temp;
+            }
+            if(x > 0) {
+                laplacian += surface.data[y * surface.width + (x - 1)];
+            }
+            else {
+                laplacian += surrounding_temp;
+            }
+            if(y < (surface.height - 1)) {
+                laplacian += surface.data[(y + 1) * surface.width + x];
+            }
+            else {
+                laplacian += surrounding_temp;
+            }
+            if(y > 0) {
+                laplacian += surface.data[(y - 1) * surface.width + x];
+            }
+            else {
+                laplacian += surrounding_temp;
+            }
+            const float diffusion = material.thermal_diffusivity * laplacian;
+            const float cooling = material.thermal_loss_coefficient * (T - surrounding_temp);
+
+            swap_data[y * surface.width + x] = T + dt * (diffusion - cooling);
+        }
+    }
+    memcpy(surface.data, swap_data, sizeof(float) * surface.width * surface.height);
+}
+static void AccumulateHotSpots(const SimulationSurface& surface, float* hotspots) {
+    for(uint32_t y = 0; y < surface.height; ++y) {
+        for(uint32_t x = 0; x < surface.width; ++x) {
+            const float T = surface.data[y * surface.width + x];
+            hotspots[y * surface.width + x] = std::max(hotspots[y * surface.width + x], T);
+        }
+    }
+
+}
+HotSpotData Sim_CalculateHotspots(const InfillData& info, const std::vector<Nozzle>& nozzles, const MaterialConstants& material, const SimData& sim) {
     static constexpr float INTEGRATION_SUBSTEPS = 10.0f;
     static constexpr float INV_INTEGRATION_SUBSTEPS = 1.0f / INTEGRATION_SUBSTEPS;
     HotSpotData output {};
-    const glm::vec2 extend = info.bounds.max - info.bounds.min;
+    const glm::vec2 extend = sim.bounds.max - sim.bounds.min;
     const float aspect_ratio = extend.y / extend.x;
-    const uint32_t resolution_y = resolution_x * aspect_ratio;
-    output.width = resolution_x;
+    const uint32_t resolution_y = sim.resolution_x * aspect_ratio;
+    output.width = sim.resolution_x;
     output.height = resolution_y;
     output.max = -FLT_MAX;
     output.min = FLT_MAX;
@@ -125,10 +171,11 @@ HotSpotData Sim_CalculateHotspots(const InfillData& info, const std::vector<Nozz
     surface.data = new float[output.width * output.height];
     surface.width = output.width;
     surface.height = output.height;
-    surface.bounds = info.bounds;
+    surface.bounds = sim.bounds;
     surface.extend = surface.bounds.max - surface.bounds.min;
     surface.pixel_size = glm::vec2(surface.extend.x / surface.width, surface.extend.y / surface.height);
     memset(surface.data, 0, sizeof(float) * output.width * output.height);
+    float* swap_data = new float[output.width * output.height];
 
 
     std::vector<NozzleSimData> nozzles_sim_data(nozzles.size());
@@ -145,15 +192,16 @@ HotSpotData Sim_CalculateHotspots(const InfillData& info, const std::vector<Nozz
         nozzle_sim.cur_line_percentile = 0.0f;
 
         nozzle_sim.finished = false;
-        nozzle_sim.UpdateSimulationVariables(0.0f, INV_INTEGRATION_SUBSTEPS);
+        nozzle_sim.UpdateSimulationVariables(0.0f, INTEGRATION_SUBSTEPS);
     }
+
 
     float cur_time = 0.0f;
     bool all_finished = false;
     while(!all_finished) {
         all_finished = true;
         for(auto& nozzle : nozzles_sim_data) {
-            nozzle.UpdateSimulationVariables(time_step, INV_INTEGRATION_SUBSTEPS);
+            nozzle.UpdateSimulationVariables(sim.time_step, INTEGRATION_SUBSTEPS);
 
             while(nozzle.travel > 0.0f) {
                 if(info.lines.size() <= nozzle.cur_line_idx) {
@@ -179,21 +227,29 @@ HotSpotData Sim_CalculateHotspots(const InfillData& info, const std::vector<Nozz
                 }
             }
             if(!nozzle.finished) {
-                MaterialAddHeatAtSpot(surface, material, nozzle.pos, nozzle.cur_size, nozzle.cur_temp, time_step);
+                MaterialAddHeatAtSpot(surface, material, nozzle.pos, nozzle.cur_size, nozzle.cur_temp, sim.time_step);
                 all_finished = false;
             }
         }
 
-        cur_time += time_step;
+        MaterialDissipate(surface, swap_data, material, 0.0f, sim.time_step);
+        AccumulateHotSpots(surface, output.data);
+
+        cur_time += sim.time_step;
     }
 
-    // currently no dissipation, so the max is the current
+    // output final state of the simulation
+    // for(size_t i = 0; i < output.width * output.height; ++i) {
+    //     output.data[i] = surface.data[i];
+    //     output.min = std::min(surface.data[i], output.min);
+    //     output.max = std::max(surface.data[i], output.max);
+    // }
     for(size_t i = 0; i < output.width * output.height; ++i) {
-        output.data[i] = surface.data[i];
         output.min = std::min(surface.data[i], output.min);
         output.max = std::max(surface.data[i], output.max);
     }
-    delete [] surface.data;
+    delete[] surface.data;
+    delete[] swap_data;
     return output;
 }
 void Sim_DestroyHotSpotData(HotSpotData& data) {
