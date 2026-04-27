@@ -22,7 +22,6 @@ struct MaterialConstants {
 
     // might be useful
     float melting_point;
-    float thermal_conductvity;
     float heat_capacity;
     float thermal_expansion;
 };
@@ -33,7 +32,8 @@ struct SimData {
 };
 
 struct HotSpotData {
-    float* data; 
+    float* temp; 
+    float* last_state;
     uint32_t width;
     uint32_t height;
     float min;

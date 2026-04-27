@@ -1,5 +1,7 @@
 #include "util.h"
 
+static constexpr float TOLERANCE = 0.001f;
+
 static float Cross(const glm::vec2& a, const glm::vec2& b, const glm::vec2& c) {
     return (b.x - a.x) * (c.y - b.y) - (b.y - a.y) * (c.x - b.x);
 }
@@ -635,7 +637,6 @@ float Util_LineLineIntersection(const glm::vec2& p1, const glm::vec2& dir1, cons
     return t;
 }
 std::vector<SurfaceGroup> Util_CalculateSurfaceGroups(const std::vector<Triangle>& model, const BBox& model_bounds, float layer_height) {
-    static constexpr float TOLERANCE = 0.001f;
     std::vector<SurfaceGroup> groups;
     const glm::vec3& bb_min = model_bounds.min;
     const glm::vec3& bb_max = model_bounds.max;
@@ -801,6 +802,9 @@ InfillData Util_CalculateInfill(const std::vector<SurfaceGroup>& groups, const I
     std::vector<LineHits> rays;
     glm::vec2 dir = {};
     glm::vec2 nor = {};
+    glm::vec2 dir2 = {};
+    glm::vec2 nor2 = {};
+    bool two_directional = false;
     if(settings.pattern == InfillSettings::Pattern::Rectilinear) {
         dir = {1.0f, 0.0f};
         nor = {0.0f, 1.0f};
@@ -816,6 +820,14 @@ InfillData Util_CalculateInfill(const std::vector<SurfaceGroup>& groups, const I
             dir = {0.0f, 1.0f};
             nor = {1.0f, 0.0f};
         }
+    }
+    else if(settings.pattern == InfillSettings::Pattern::Grid) {
+        two_directional = true;
+        dir = {1.0f, 0.0f};
+        nor = {0.0f, 1.0f};
+
+        dir2 = {0.0f, 1.0f};
+        nor2 = {1.0f, 0.0f};
     }
 
     glm::vec2 bb_min = glm::vec2(FLT_MAX);
@@ -852,6 +864,20 @@ InfillData Util_CalculateInfill(const std::vector<SurfaceGroup>& groups, const I
                 .hits = {},
         });
     }
+    if(two_directional) {
+        const float height = glm::dot((bb_max - bb_min), nor2);
+        const uint32_t max_line_count = height / settings.line_width;
+        uint32_t real_line_count = max_line_count * settings.percentage / 100.0f;
+        const float line_distance = height / static_cast<float>(real_line_count);
+        for(uint32_t i = 0; i < real_line_count; ++i) {
+            glm::vec2 start = center - height * nor2 * 0.5f + i * line_distance * nor2 - dir2 * diagonal;
+            rays.push_back({
+                    .start = start,
+                    .dir = dir2 * 2.0f * diagonal,
+                    .hits = {},
+                    });
+        }
+    }
 
 
     for(const SurfaceGroup& group : groups) {
@@ -869,7 +895,7 @@ InfillData Util_CalculateInfill(const std::vector<SurfaceGroup>& groups, const I
             const glm::vec2 l2 = group.points.at(next).xz();
             for(auto& ray : rays) {
                 float t = Util_LineLineIntersection(ray.start, ray.dir, l1, l2 - l1);
-                if(t >= -EPSILON && t <= (1.0f + EPSILON)) {
+                if(t >= -EPSILON && t < (1.0f + EPSILON)) {
                     ray.hits.push_back(t);
                 }
             }
@@ -877,6 +903,14 @@ InfillData Util_CalculateInfill(const std::vector<SurfaceGroup>& groups, const I
     }
 
     for(auto& ray : rays) {
+        for(size_t i = 0; i < ray.hits.size(); ++i) {
+            for(size_t j = ray.hits.size() - 1; j > i; --j) {
+                if(std::abs(ray.hits.at(i) - ray.hits.at(j)) < TOLERANCE) {
+                    ray.hits.erase(ray.hits.begin() + j);
+                }
+            }
+        }
+        
         if(ray.hits.size() < 2) {
             continue;
         }

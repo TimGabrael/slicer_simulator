@@ -160,8 +160,8 @@ HotSpotData Sim_CalculateHotspots(const InfillData& info, const std::vector<Nozz
     output.max = -FLT_MAX;
     output.min = FLT_MAX;
 
-    output.data = new float[output.width * output.height];
-    memset(output.data, 0, sizeof(float) * output.width * output.height);
+    output.temp = new float[output.width * output.height];
+    memset(output.temp, 0, sizeof(float) * output.width * output.height);
 
     if(nozzles.empty() || info.lines.empty()) {
         return output;
@@ -222,7 +222,7 @@ HotSpotData Sim_CalculateHotspots(const InfillData& info, const std::vector<Nozz
                         continue;
                     }
                     nozzle.cur_line_percentile += moved_percentile;
-                    nozzle.pos = dir * nozzle.cur_line_percentile + p1;
+                    nozzle.pos = dir * nozzle.cur_line_percentile + p1 + nozzle.cur_local_pos;
                     nozzle.travel = 0.0f;
                 }
             }
@@ -233,7 +233,7 @@ HotSpotData Sim_CalculateHotspots(const InfillData& info, const std::vector<Nozz
         }
 
         MaterialDissipate(surface, swap_data, material, 0.0f, sim.time_step);
-        AccumulateHotSpots(surface, output.data);
+        AccumulateHotSpots(surface, output.temp);
 
         cur_time += sim.time_step;
     }
@@ -245,18 +245,18 @@ HotSpotData Sim_CalculateHotspots(const InfillData& info, const std::vector<Nozz
     //     output.max = std::max(surface.data[i], output.max);
     // }
     for(size_t i = 0; i < output.width * output.height; ++i) {
-        output.min = std::min(surface.data[i], output.min);
-        output.max = std::max(surface.data[i], output.max);
+        output.min = std::min(output.temp[i], output.min);
+        output.max = std::max(output.temp[i], output.max);
     }
-    delete[] surface.data;
+    output.last_state = surface.data;
     delete[] swap_data;
     return output;
 }
 void Sim_DestroyHotSpotData(HotSpotData& data) {
-    if(data.data) {
-        delete[] data.data;
+    if(data.temp) {
+        delete[] data.temp;
     }
-    data.data = nullptr;
+    data.temp = nullptr;
     data.width = 0;
     data.height = 0;
 }

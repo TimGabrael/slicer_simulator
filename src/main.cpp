@@ -70,7 +70,7 @@ int main() {
     };
     std::vector<SurfaceGroup> groups = Util_CalculateSurfaceGroups(model_data, model_bounds, LAYER_HEIGHT);
     InfillSettings settings = {
-        .pattern = InfillSettings::Pattern::Rectilinear,
+        .pattern = InfillSettings::Pattern::Grid,
         .percentage = 100.0f,
         .offset = 0.0f,
         .line_width = LINE_WIDTH,
@@ -154,23 +154,23 @@ int main() {
     hotspot_data.min = FLT_MAX;
     hotspot_data.max = -FLT_MAX;
     for(uint32_t i = 0; i < hotspot_data.width * hotspot_data.height; ++i) {
-        if(hotspot_data.data[i] < cutoff) {
-            hotspot_data.data[i] = -FLT_MAX;
+        if(hotspot_data.temp[i] < cutoff) {
+            hotspot_data.temp[i] = -FLT_MAX;
             continue;
         }
-        const float db = 10.0f * std::log10f((hotspot_data.data[i] + EPSILON - cutoff * 0.8f) / decible_ref);
-        hotspot_data.data[i] = db;
+        const float db = 10.0f * std::log10f((hotspot_data.temp[i] + EPSILON - cutoff * 0.8f) / decible_ref);
+        hotspot_data.temp[i] = db;
         hotspot_data.max = std::max(hotspot_data.max, db);
         hotspot_data.min = std::min(hotspot_data.min, db);
     }
     delta_hotspot = (hotspot_data.max - hotspot_data.min);
     std::cout << "db_min/max: " << hotspot_data.min << ", " << hotspot_data.max << std::endl;
     for(uint32_t i = 0; i < hotspot_data.width * hotspot_data.height; ++i) {
-        if(hotspot_data.data[i] < -1e10) {
+        if(hotspot_data.temp[i] < -1e10) {
             texture_data[i] = 0.0f;
             continue;
         }
-        const float normalized = (hotspot_data.data[i] - hotspot_data.min) / delta_hotspot;
+        const float normalized = (hotspot_data.temp[i] - hotspot_data.min) / delta_hotspot;
 
         //if(hotspot_data.data[i] < cutoff) {
         //    texture_data[i] = 0;
