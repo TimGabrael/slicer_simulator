@@ -6,7 +6,7 @@ struct NozzleSimData {
 
     float cur_temp;
     float cur_speed;
-    glm::vec2 cur_size;
+    float cur_size;
     glm::vec2 cur_local_pos;
     float travel;
     uint32_t cur_line_idx;
@@ -62,18 +62,47 @@ struct SimulationSurface {
 };
 
 
-// px, py, radius in pixel
-static void MaterialAddHeatAtSpot(SimulationSurface& surface, const MaterialConstants& material, float center_x, float center_y, float radius, float temperature) {
+// center_x, center_y, radius in pixel
+static void MaterialAddHeatAtSpot(SimulationSurface& surface, const MaterialConstants& material, const glm::vec2& center, float radius, float temperature, float dt) {
+    static constexpr uint32_t INTEGRAL_RESOLUTION = 40;
+    static constexpr float INV_INTEGRAL_RESOLUTION = 1.0f / static_cast<float>(INTEGRAL_RESOLUTION);
+
     const float inv_radius_2 = 1.0f / (radius * radius);
-    auto heating_at_point = [temperature, inv_radius_2, center_x, center_y](float x, float y) {
-        const float dx = (x - center_x);
-        const float dy = (y - center_y);
+    auto heating_at_point = [temperature, inv_radius_2, center](float x, float y) {
+        const float dx = (x - center.x);
+        const float dy = (y - center.y);
         const float r = std::sqrtf(dx * dx + dy * dy);
         return temperature * std::expf(-2.0f * r * inv_radius_2);
     };
+    const glm::vec2 delta = surface.pixel_size * INV_INTEGRAL_RESOLUTION;
+    auto integrate_heating = [heating_at_point, delta](float sx, float sy) {
+        float sum = 0.0f;
+        for(uint32_t y = 0; y < INTEGRAL_RESOLUTION; ++y) {
+            for(uint32_t x = 0; x < INTEGRAL_RESOLUTION; ++x) {
+                const float cx = sx + (x + 0.5f) * delta.x;
+                const float cy = sy + (y + 0.5f) * delta.y;
 
+                sum += heating_at_point(cx, cy);
+            }
+        }
+        return sum * delta.x * delta.y;
+    };
+
+    for(uint32_t y = 0; y < surface.height; ++y) {
+        for(uint32_t x = 0; x < surface.width; ++x) {
+            //glm::vec2 pixel_world_pos = glm::vec2(x, y) * surface.pixel_size + surface.bounds.min;
+
+            // the integration part seems good and is probably more accurate,
+            // but it takes AGES
+            //const float pixel_heating = integrate_heating(pixel_world_pos.x, pixel_world_pos.y);
+
+            glm::vec2 pixel_world_pos = glm::vec2(x + 0.5f, y + 0.5f) * surface.pixel_size + surface.bounds.min;
+            const float pixel_heating = heating_at_point(pixel_world_pos.x, pixel_world_pos.y);
+            surface.data[y * surface.width + x] += material.thermal_absorptance * pixel_heating * dt;
+        }
+    }
 }
-HotSpotData Sim_CalculateTemperatureGradient(const InfillData& info, const std::vector<Nozzle>& nozzles, const MaterialConstants& material, uint32_t resolution_x, float time_step) {
+HotSpotData Sim_CalculateHotspots(const InfillData& info, const std::vector<Nozzle>& nozzles, const MaterialConstants& material, uint32_t resolution_x, float time_step) {
     static constexpr float INTEGRATION_SUBSTEPS = 10.0f;
     static constexpr float INV_INTEGRATION_SUBSTEPS = 1.0f / INTEGRATION_SUBSTEPS;
     HotSpotData output {};
@@ -120,14 +149,14 @@ HotSpotData Sim_CalculateTemperatureGradient(const InfillData& info, const std::
     }
 
     float cur_time = 0.0f;
-    bool finished = false;
-    while(finished) {
-        bool all_finished = false;
+    bool all_finished = false;
+    while(!all_finished) {
+        all_finished = true;
         for(auto& nozzle : nozzles_sim_data) {
             nozzle.UpdateSimulationVariables(time_step, INV_INTEGRATION_SUBSTEPS);
 
-            while(true) {
-                if(info.lines.size() < nozzle.cur_line_idx) {
+            while(nozzle.travel > 0.0f) {
+                if(info.lines.size() <= nozzle.cur_line_idx) {
                     nozzle.finished = true;
                     break;
                 }
@@ -139,19 +168,32 @@ HotSpotData Sim_CalculateTemperatureGradient(const InfillData& info, const std::
                     const float moved_percentile = nozzle.travel / len;
                     if((nozzle.cur_line_percentile + moved_percentile) > 1.0f) {
                         nozzle.cur_line_idx += 1;
+                        nozzle.cur_line_percentile = 0.0f;
+                        const float remaining_len = (1.0f - nozzle.cur_line_percentile) * len;
+                        nozzle.travel -= remaining_len;
+                        continue;
                     }
+                    nozzle.cur_line_percentile += moved_percentile;
+                    nozzle.pos = dir * nozzle.cur_line_percentile + p1;
+                    nozzle.travel = 0.0f;
                 }
             }
-
-
-            if(nozzle.finished) {
-                all_finished = true;
+            if(!nozzle.finished) {
+                MaterialAddHeatAtSpot(surface, material, nozzle.pos, nozzle.cur_size, nozzle.cur_temp, time_step);
+                all_finished = false;
             }
         }
 
         cur_time += time_step;
     }
 
+    // currently no dissipation, so the max is the current
+    for(size_t i = 0; i < output.width * output.height; ++i) {
+        output.data[i] = surface.data[i];
+        output.min = std::min(surface.data[i], output.min);
+        output.max = std::max(surface.data[i], output.max);
+    }
+    delete [] surface.data;
     return output;
 }
 void Sim_DestroyHotSpotData(HotSpotData& data) {

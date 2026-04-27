@@ -4,8 +4,8 @@
 
 struct Nozzle {
     Path2D local_path;
-    Path2D size;
 
+    Path1D size;
     Path1D temperature;
     Path1D speed;
 
