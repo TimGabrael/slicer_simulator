@@ -856,11 +856,13 @@ InfillData Util_CalculateInfill(const std::vector<SurfaceGroup>& groups, const I
     uint32_t max_line_count = height / settings.line_width;
     uint32_t real_line_count = max_line_count * settings.percentage / 100.0f;
     const float line_distance = height / static_cast<float>(real_line_count);
+
+    const float ray_length = 2.0f * diagonal;
     for(uint32_t i = 0; i < real_line_count; ++i) {
         glm::vec2 start = center - height * nor * 0.5f + i * line_distance * nor - dir * diagonal;
         rays.push_back({
                 .start = start,
-                .dir = dir * 2.0f * diagonal,
+                .dir = dir * ray_length,
                 .hits = {},
         });
     }
@@ -873,9 +875,9 @@ InfillData Util_CalculateInfill(const std::vector<SurfaceGroup>& groups, const I
             glm::vec2 start = center - height * nor2 * 0.5f + i * line_distance * nor2 - dir2 * diagonal;
             rays.push_back({
                     .start = start,
-                    .dir = dir2 * 2.0f * diagonal,
+                    .dir = dir2 * ray_length,
                     .hits = {},
-                    });
+            });
         }
     }
 
@@ -902,6 +904,7 @@ InfillData Util_CalculateInfill(const std::vector<SurfaceGroup>& groups, const I
         }
     }
 
+    float offset_ray_percentage = settings.offset / ray_length;
     for(auto& ray : rays) {
         for(size_t i = 0; i < ray.hits.size(); ++i) {
             for(size_t j = ray.hits.size() - 1; j > i; --j) {
@@ -918,14 +921,15 @@ InfillData Util_CalculateInfill(const std::vector<SurfaceGroup>& groups, const I
         glm::vec2 start = {};
         for(size_t i = 0; i < ray.hits.size(); ++i) {
             const float t = ray.hits.at(i);
-            glm::vec2 hit = ray.start + ray.dir * t;
             if((i % 2)) {
+                glm::vec2 hit = ray.start + ray.dir * (t - offset_ray_percentage);
                 output.lines.push_back({
                     .p1 = start,
                     .p2 = hit,
                 });
             }
             else {
+                glm::vec2 hit = ray.start + ray.dir * (t + offset_ray_percentage);
                 start = hit;
             }
         }

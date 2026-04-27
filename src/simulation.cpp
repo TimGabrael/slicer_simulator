@@ -256,7 +256,11 @@ void Sim_DestroyHotSpotData(HotSpotData& data) {
     if(data.temp) {
         delete[] data.temp;
     }
+    if(data.last_state) {
+        delete[] data.last_state;
+    }
     data.temp = nullptr;
+    data.last_state = nullptr;
     data.width = 0;
     data.height = 0;
 }

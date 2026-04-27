@@ -72,7 +72,7 @@ int main() {
     InfillSettings settings = {
         .pattern = InfillSettings::Pattern::Grid,
         .percentage = 100.0f,
-        .offset = 0.0f,
+        .offset = LINE_WIDTH,
         .line_width = LINE_WIDTH,
         .offset_rectilinear = false,
     };
@@ -134,67 +134,65 @@ int main() {
         hot_spot_layer = line_data.at(i).layer_idx;
         sim_data.bounds.min = line_data.at(i).bounds.min - glm::vec2(LINE_WIDTH * 10.0f); 
         sim_data.bounds.max = line_data.at(i).bounds.max + glm::vec2(LINE_WIDTH * 10.0f); 
-        hotspot_data = Sim_CalculateHotspots(line_data.at(i), {nozzle}, material, sim_data);
+        //hotspot_data = Sim_CalculateHotspots(line_data.at(i), {nozzle}, material, sim_data);
         break;
     }
 
-    uint32_t* texture_data = new uint32_t[hotspot_data.width * hotspot_data.height];
-    float delta_hotspot = (hotspot_data.max - hotspot_data.min);
-    std::cout << "min/max: " << hotspot_data.min << ", " << hotspot_data.max << std::endl;
-    const float cutoff = 5.0f;
-    if(hotspot_data.min < cutoff) {
-        hotspot_data.min = cutoff;
+    Texture tex = {};
+    if(hotspot_data.temp) {
+        uint32_t* texture_data = new uint32_t[hotspot_data.width * hotspot_data.height];
+        float delta_hotspot = (hotspot_data.max - hotspot_data.min);
+        std::cout << "min/max: " << hotspot_data.min << ", " << hotspot_data.max << std::endl;
+        const float cutoff = 5.0f;
+        if(hotspot_data.min < cutoff) {
+            hotspot_data.min = cutoff;
+            delta_hotspot = (hotspot_data.max - hotspot_data.min);
+        }
+        if(delta_hotspot < EPSILON) {
+            delta_hotspot = EPSILON;
+        }
+        // convert to decible
+        float decible_ref = hotspot_data.max * 0.1f;
+        hotspot_data.min = FLT_MAX;
+        hotspot_data.max = -FLT_MAX;
+        for(uint32_t i = 0; i < hotspot_data.width * hotspot_data.height; ++i) {
+            if(hotspot_data.temp[i] < cutoff) {
+                hotspot_data.temp[i] = -FLT_MAX;
+                continue;
+            }
+            const float db = 10.0f * std::log10f((hotspot_data.temp[i] + EPSILON - cutoff * 0.8f) / decible_ref);
+            hotspot_data.temp[i] = db;
+            hotspot_data.max = std::max(hotspot_data.max, db);
+            hotspot_data.min = std::min(hotspot_data.min, db);
+        }
         delta_hotspot = (hotspot_data.max - hotspot_data.min);
-    }
-    if(delta_hotspot < EPSILON) {
-        delta_hotspot = EPSILON;
-    }
-    // convert to decible
-    float decible_ref = hotspot_data.max * 0.1f;
-    hotspot_data.min = FLT_MAX;
-    hotspot_data.max = -FLT_MAX;
-    for(uint32_t i = 0; i < hotspot_data.width * hotspot_data.height; ++i) {
-        if(hotspot_data.temp[i] < cutoff) {
-            hotspot_data.temp[i] = -FLT_MAX;
-            continue;
+        std::cout << "db_min/max: " << hotspot_data.min << ", " << hotspot_data.max << std::endl;
+        for(uint32_t i = 0; i < hotspot_data.width * hotspot_data.height; ++i) {
+            if(hotspot_data.temp[i] < -1e10) {
+                texture_data[i] = 0.0f;
+                continue;
+            }
+            const float normalized = (hotspot_data.temp[i] - hotspot_data.min) / delta_hotspot;
+
+            const glm::vec4 col = glm::vec4(1.0f, 0.0f, 0.0f, 1.0f) * normalized + (1.0f - normalized) * glm::vec4(0.0f, 0.0f, 1.0f, 1.0f);
+            uint32_t r = (glm::max(glm::min(col.x, 1.0f), 0.0f) * 0xFF);
+            uint32_t g = (glm::max(glm::min(col.y, 1.0f), 0.0f) * 0xFF);
+            uint32_t b = (glm::max(glm::min(col.z, 1.0f), 0.0f) * 0xFF);
+            uint32_t a = (glm::max(glm::min(col.w, 1.0f), 0.0f) * 0xFF);
+            texture_data[i] = (a << 24) | (b << 16) | (g << 8) | r;
         }
-        const float db = 10.0f * std::log10f((hotspot_data.temp[i] + EPSILON - cutoff * 0.8f) / decible_ref);
-        hotspot_data.temp[i] = db;
-        hotspot_data.max = std::max(hotspot_data.max, db);
-        hotspot_data.min = std::min(hotspot_data.min, db);
+
+        Image img = {};
+        img.data = texture_data;
+        img.width = hotspot_data.width;
+        img.height = hotspot_data.height;
+        img.mipmaps = 1;
+        img.format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8;
+        tex = LoadTextureFromImage(img);
+        delete[] texture_data;
+        Sim_DestroyHotSpotData(hotspot_data);
+        texture_data = nullptr;
     }
-    delta_hotspot = (hotspot_data.max - hotspot_data.min);
-    std::cout << "db_min/max: " << hotspot_data.min << ", " << hotspot_data.max << std::endl;
-    for(uint32_t i = 0; i < hotspot_data.width * hotspot_data.height; ++i) {
-        if(hotspot_data.temp[i] < -1e10) {
-            texture_data[i] = 0.0f;
-            continue;
-        }
-        const float normalized = (hotspot_data.temp[i] - hotspot_data.min) / delta_hotspot;
-
-        //if(hotspot_data.data[i] < cutoff) {
-        //    texture_data[i] = 0;
-        //    continue;
-        //}
-
-        const glm::vec4 col = glm::vec4(1.0f, 0.0f, 0.0f, 1.0f) * normalized + (1.0f - normalized) * glm::vec4(0.0f, 0.0f, 1.0f, 1.0f);
-        uint32_t r = (glm::max(glm::min(col.x, 1.0f), 0.0f) * 0xFF);
-        uint32_t g = (glm::max(glm::min(col.y, 1.0f), 0.0f) * 0xFF);
-        uint32_t b = (glm::max(glm::min(col.z, 1.0f), 0.0f) * 0xFF);
-        uint32_t a = (glm::max(glm::min(col.w, 1.0f), 0.0f) * 0xFF);
-        texture_data[i] = (a << 24) | (b << 16) | (g << 8) | r;
-    }
-
-    Image img = {};
-    img.data = texture_data;
-    img.width = hotspot_data.width;
-    img.height = hotspot_data.height;
-    img.mipmaps = 1;
-    img.format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8;
-    Texture2D tex = LoadTextureFromImage(img);
-    delete[] texture_data;
-    texture_data = nullptr;
-
 
 
 
